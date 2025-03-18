@@ -20,18 +20,15 @@ app.conf.broker_connection_retry_on_startup = True
 
 
 
+
 @app.task(bind=True)
-def fetch_tender_numbers(self, page_number):
+def fetch_tender(self, page_number:int)->list:
     url = f'{URL_FZ_44}{page_number}'
     print("Constructed URL:", url)
     s = requests.Session()
     response = s.get(url, headers=HEADERS)
-    print("Response status code:", response.status_code)
-    
-    if response.status_code != 200:
-        print("Failed to retrieve the URL.")
-        return []
     soup = BeautifulSoup(response.content, 'html.parser')
+    
     tender_numbers = []
 
     # Находим все ссылки на печатные формы
@@ -43,19 +40,24 @@ def fetch_tender_numbers(self, page_number):
 
 
 @app.task(bind=True)
-def parse_xml_form(self, reg_number):
-    xml_url = f'{URL_XML}{reg_number}'
-    s = requests.Session()
-    response = s.get(xml_url, headers=HEADERS).text
-    try:
-        data = find_key('publishDTInEIS',json.loads(json.dumps(xmltodict.parse(response))))
-        publish_date = next(data)
-        return publish_date
-    except Exception as e:
-        print(f"Error parsing XML for {reg_number}: {e}")
-        return None
+def parse_xml(self, *reg_number):
+    nums = parsing_list(reg_number)
+    date = []
+    for num in nums:
+        xml_url = f'{URL_XML}{num}'
+        s = requests.Session()
+        response = s.get(xml_url, headers=HEADERS).text
+        try:
+            data = find_key('publishDTInEIS',json.loads(json.dumps(xmltodict.parse(response))))
+            publish_date = next(data)
+            result = f"{URL_XML}{num} - {publish_date}"
+            date.append(result)
+        except Exception as e:
+            print(f"Error parsing XML for {num}: {e}")
+            continue
+    return date
 
- 
+
 def find_key(key, dictionary):
     for k, v in dictionary.items():
         if k == key:
@@ -67,3 +69,18 @@ def find_key(key, dictionary):
             for d in v:
                 for result in find_key(key, d):
                     yield result
+
+
+def parsing_list(numbers):
+    result = []
+    date = numbers
+    page = 0
+    while  len(date)<3:
+        for num in date:
+            result.extend(num)
+        date = result
+        result=[]
+        if page==100:
+            break
+        page+=1  
+    return date
